@@ -20,10 +20,9 @@ pipeline {
                 sh '''
                     export ESPRESSIF_HOME=/home/jenkins/.espressif
                     . /opt/esp/idf/export.sh
-                    cd firmware
                     idf.py set-target esp32
                     idf.py build
-                    cp build/*.bin ../${FW_ARTIFACT}
+                    cp build/*.bin ${FW_ARTIFACT}
                 '''
             }
         }
