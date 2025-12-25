@@ -1,6 +1,14 @@
 pipeline {
     agent none
 
+    parameters {
+        string(
+            name: 'BRANCH_NAME',
+            defaultValue: 'main',
+            description: 'Git branch to build (e.g., main, develop, feature/xxx)'
+        )
+    }
+
     environment {
         FW_ARTIFACT = "firmware.bin"
     }
@@ -10,7 +18,14 @@ pipeline {
         stage('Checkout Source') {
             agent { label 'fw-build' }   // 🚨 Xeon build agent
             steps {
-                checkout scm
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: "*/${params.BRANCH_NAME}"]],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [],
+                    submoduleCfg: [],
+                    userRemoteConfigs: scm.userRemoteConfigs
+                ])
             }
         }
 
