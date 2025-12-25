@@ -13,19 +13,14 @@ pipeline {
             description: 'Build number of the firmware to test'
         )
         string(
-            name: 'FW_ARTIFACT',
-            defaultValue: 'firmware-esp32.bin',
-            description: 'Firmware artifact name'
-        )
-        string(
-            name: 'PLATFORM',
-            defaultValue: 'ESP32',
-            description: 'Platform name (ESP32, RaspberryPi, nRF52, ...)'
-        )
-        string(
             name: 'ATS_NODE_LABEL',
             defaultValue: 'ats-node',
             description: 'Label for ATS node pool (e.g., ats-node, ats-pi-01)'
+        )
+        string(
+            name: 'ATS_NODE_TEST_IMAGE',
+            defaultValue: 'ats-node-test:latest',
+            description: 'Docker image name for ATS node test container'
         )
         string(
             name: 'TEST_REPO_URL',
@@ -40,40 +35,13 @@ pipeline {
     }
 
     environment {
-        TEST_REPORT_DIR = "reports"
+        WORKSPACE_DIR = "workspace"
+        RESULTS_DIR = "results"
         TEST_REPO_DIR = "ats-test-esp32-demo"
     }
 
     stages {
-        stage('Checkout Test Framework') {
-            agent { label "${params.ATS_NODE_LABEL}" }
-            steps {
-                echo "📦 Checking out test framework: ${params.TEST_REPO_URL}"
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "*/${params.TEST_REPO_BRANCH}"]],
-                    doGenerateSubmoduleConfigurations: false,
-                    extensions: [[
-                        $class: 'RelativeTargetDirectory',
-                        relativeTargetDir: env.TEST_REPO_DIR
-                    ]],
-                    submoduleCfg: [],
-                    userRemoteConfigs: [[
-                        url: params.TEST_REPO_URL,
-                        credentialsId: ''
-                    ]]
-                ])
-                
-                sh """
-                    echo "✅ Test framework checked out to: ${env.TEST_REPO_DIR}"
-                    ls -la ${env.TEST_REPO_DIR}/agent/ 2>/dev/null || echo "⚠️  agent/ directory not found in ${env.TEST_REPO_DIR}"
-                    echo "📁 Repository structure:"
-                    ls -la ${env.TEST_REPO_DIR}/ 2>/dev/null | head -10
-                """
-            }
-        }
-
-        stage('Copy Firmware Artifact') {
+        stage('Prepare Workspace') {
             agent { label "${params.ATS_NODE_LABEL}" }
             steps {
                 script {
@@ -81,114 +49,123 @@ pipeline {
                         error("BUILD_NUMBER parameter is required")
                     }
                     
-                    echo "📥 Copying firmware from ${params.BUILD_JOB_NAME} #${params.BUILD_NUMBER}"
+                    // Create workspace directory
+                    sh """
+                        mkdir -p ${WORKSPACE_DIR}
+                        cd ${WORKSPACE_DIR}
+                    """
                     
+                    // Copy firmware artifacts from build job
+                    echo "📥 Copying firmware artifacts from ${params.BUILD_JOB_NAME} #${params.BUILD_NUMBER}"
                     copyArtifacts(
                         projectName: params.BUILD_JOB_NAME,
                         selector: specific(params.BUILD_NUMBER),
-                        filter: "${params.FW_ARTIFACT},ats-manifest.yaml",
-                        target: "${env.TEST_REPO_DIR}",
+                        filter: "*.bin,ats-manifest.yaml",
+                        target: WORKSPACE_DIR,
                         flatten: true
                     )
                     
+                    // Checkout test framework
+                    echo "📦 Checking out test framework: ${params.TEST_REPO_URL}"
+                    dir(WORKSPACE_DIR) {
+                        checkout([
+                            $class: 'GitSCM',
+                            branches: [[name: "*/${params.TEST_REPO_BRANCH}"]],
+                            doGenerateSubmoduleConfigurations: false,
+                            extensions: [[
+                                $class: 'RelativeTargetDirectory',
+                                relativeTargetDir: TEST_REPO_DIR
+                            ]],
+                            submoduleCfg: [],
+                            userRemoteConfigs: [[
+                                url: params.TEST_REPO_URL,
+                                credentialsId: ''
+                            ]]
+                        ])
+                    }
+                    
+                    // Verify workspace structure
                     sh """
-                        echo "✅ Firmware artifact copied to test framework:"
-                        ls -lh ${env.TEST_REPO_DIR}/${params.FW_ARTIFACT} || echo "❌ Firmware not found"
-                        ls -lh ${env.TEST_REPO_DIR}/ats-manifest.yaml || echo "⚠️  Manifest not found"
+                        echo "✅ Workspace prepared:"
+                        ls -lh ${WORKSPACE_DIR}/
+                        echo ""
+                        echo "📋 Manifest:"
+                        cat ${WORKSPACE_DIR}/ats-manifest.yaml || echo "⚠️  Manifest not found"
                     """
                 }
             }
         }
 
-        stage('Build Test Container') {
+        stage('Build ATS Node Test Container') {
             agent { label "${params.ATS_NODE_LABEL}" }
             steps {
-                dir(env.TEST_REPO_DIR) {
+                script {
+                    // Check if ats-ats-node repo is available
+                    def atsNodeRepo = "${WORKSPACE_DIR}/ats-ats-node"
+                    
                     sh """
-                        echo "🐳 [ATS] Building test container for ${PLATFORM}"
-                        echo "📁 Working directory: \$(pwd)"
+                        # Try to checkout ats-ats-node if not present
+                        if [ ! -d "${atsNodeRepo}" ]; then
+                            echo "📦 Checking out ats-ats-node repository..."
+                            cd ${WORKSPACE_DIR}
+                            git clone https://github.com/PicoPiece/ats-ats-node.git || echo "⚠️  Could not clone ats-ats-node"
+                        fi
                         
-                        # Build Docker image if Dockerfile exists
-                        if [ -f Dockerfile ]; then
-                            docker build -t ats-test-runner:${PLATFORM,,} .
-                            echo "✅ Test container built successfully"
+                        # Build ats-node-test container
+                        if [ -d "${atsNodeRepo}/docker/ats-node-test" ]; then
+                            echo "🐳 Building ATS node test container..."
+                            cd ${atsNodeRepo}/docker/ats-node-test
+                            docker build -t ${params.ATS_NODE_TEST_IMAGE} .
+                            echo "✅ Container built: ${params.ATS_NODE_TEST_IMAGE}"
                         else
-                            echo "⚠️  Dockerfile not found, using pre-built image"
+                            echo "⚠️  ats-node-test Dockerfile not found, using pre-built image: ${params.ATS_NODE_TEST_IMAGE}"
                         fi
                     """
                 }
             }
         }
 
-        stage('Flash Firmware') {
+        stage('Run ATS Tests') {
             agent { label "${params.ATS_NODE_LABEL}" }
             steps {
-                dir(env.TEST_REPO_DIR) {
+                dir(WORKSPACE_DIR) {
                     sh """
-                        echo "[ATS] Flashing ${PLATFORM} firmware: ${FW_ARTIFACT}"
-                        echo "🐳 Running in Docker container with hardware access"
+                        echo "🚀 [ATS] Running test execution container"
+                        echo "📋 Image: ${params.ATS_NODE_TEST_IMAGE}"
+                        echo "📁 Workspace: \$(pwd)"
                         
-                        # Run flash script in Docker container with hardware access
-                        # Using specific device mounts instead of --privileged for security
-                        docker run --rm \\
-                            --device=/dev/ttyUSB0 \\
-                            --device=/dev/ttyUSB1 \\
-                            --device=/dev/ttyACM0 \\
-                            --device=/dev/ttyACM1 \\
-                            --cap-add=SYS_RAWIO \\
-                            -v \$(pwd):/app \\
-                            -w /app \\
-                            ats-test-runner:${PLATFORM,,} \\
-                            ./agent/flash_fw.sh ${FW_ARTIFACT} ${PLATFORM}
-                    """
-                }
-            }
-        }
-
-        stage('Run Tests') {
-            agent { label "${params.ATS_NODE_LABEL}" }
-            steps {
-                dir(env.TEST_REPO_DIR) {
-                    sh """
-                        echo "[ATS] Running hardware tests for ${PLATFORM}"
-                        echo "📁 Working directory: \$(pwd)"
-                        echo "📋 Test manifest:"
-                        cat ats-manifest.yaml 2>/dev/null || echo "⚠️  Manifest not found"
+                        # Create results directory
+                        mkdir -p ${RESULTS_DIR}
                         
-                        mkdir -p ${TEST_REPORT_DIR}
-                        
-                        # Run tests in Docker container with hardware access
-                        # Using specific device mounts and capabilities instead of --privileged for security
-                        docker run --rm \\
-                            --device=/dev/ttyUSB0 \\
-                            --device=/dev/ttyUSB1 \\
-                            --device=/dev/ttyACM0 \\
-                            --device=/dev/ttyACM1 \\
-                            --cap-add=SYS_RAWIO \\
-                            --cap-add=SYS_ADMIN \\
+                        # Run ats-node-test container
+                        # Container will:
+                        # 1. Load manifest from /workspace/ats-manifest.yaml
+                        # 2. Flash firmware
+                        # 3. Run tests
+                        # 4. Write results to /workspace/results/
+                        docker run --rm --privileged \\
+                            -v /dev:/dev \\
                             -v /sys/class/gpio:/sys/class/gpio:ro \\
                             -v /dev/gpiomem:/dev/gpiomem \\
-                            -v \$(pwd):/app \\
-                            -w /app \\
-                            -e TEST_REPORT_DIR=/app/${TEST_REPORT_DIR} \\
-                            -e ESP32_GPIO_PIN=\${ESP32_GPIO_PIN:-2} \\
-                            ats-test-runner:${PLATFORM,,} \\
-                            ./agent/run_tests.sh ${FW_ARTIFACT} ${PLATFORM}
+                            -v \$(pwd):/workspace \\
+                            -e MANIFEST_PATH=/workspace/ats-manifest.yaml \\
+                            -e RESULTS_DIR=/workspace/${RESULTS_DIR} \\
+                            ${params.ATS_NODE_TEST_IMAGE}
                         
                         echo "✅ Test execution completed"
-                        echo "📊 Test reports:"
-                        ls -la ${TEST_REPORT_DIR}/ 2>/dev/null || echo "   No reports generated"
+                        echo "📊 Results:"
+                        ls -la ${RESULTS_DIR}/ || echo "   No results found"
                     """
                 }
             }
         }
 
-        stage('Archive Test Reports') {
+        stage('Archive Results') {
             agent { label "${params.ATS_NODE_LABEL}" }
             steps {
-                dir(env.TEST_REPO_DIR) {
-                    archiveArtifacts artifacts: "${TEST_REPORT_DIR}/**", allowEmptyArchive: true
-                    publishTestResults testResultsPattern: "${TEST_REPORT_DIR}/**/*.xml", allowEmptyResults: true
+                dir(WORKSPACE_DIR) {
+                    archiveArtifacts artifacts: "${RESULTS_DIR}/**", allowEmptyArchive: true
+                    publishTestResults testResultsPattern: "${RESULTS_DIR}/**/*.xml", allowEmptyResults: true
                 }
             }
         }
@@ -203,11 +180,10 @@ pipeline {
         }
         always {
             node("${params.ATS_NODE_LABEL}") {
-                dir(env.TEST_REPO_DIR) {
-                    archiveArtifacts artifacts: "${TEST_REPORT_DIR}/**", allowEmptyArchive: true
+                dir(WORKSPACE_DIR) {
+                    archiveArtifacts artifacts: "${RESULTS_DIR}/**", allowEmptyArchive: true
                 }
             }
         }
     }
 }
-
