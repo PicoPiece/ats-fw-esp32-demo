@@ -7,6 +7,16 @@ pipeline {
             defaultValue: 'main',
             description: 'Git branch to build (e.g., main, develop, feature/xxx)'
         )
+        booleanParam(
+            name: 'TRIGGER_TEST',
+            defaultValue: true,
+            description: 'Trigger test pipeline after build completes'
+        )
+        string(
+            name: 'TAG_PREFIX',
+            defaultValue: 'fw',
+            description: 'Prefix for firmware tag (e.g., fw, v, release)'
+        )
     }
 
     environment {
@@ -87,36 +97,59 @@ EOF
             }
         }
 
-        stage('Flash & Test on ATS Node (Pi)') {
-            agent { label 'ats-node' }   // 🚨 Pi node
+        stage('Tag Firmware') {
+            agent { label 'fw-build' }
             steps {
-                copyArtifacts(
-                    projectName: env.JOB_NAME,
-                    selector: specific("${env.BUILD_NUMBER}"),
-                    filter: "${FW_ARTIFACT}"
-                )
+                script {
+                    def tagName = "${params.TAG_PREFIX}-${env.BUILD_NUMBER}-${env.GIT_COMMIT.take(7)}"
+                    def tagMessage = "Firmware build #${env.BUILD_NUMBER} from ${env.GIT_BRANCH}"
+                    
+                    sh """
+                        git config user.name "Jenkins"
+                        git config user.email "jenkins@ats-ci"
+                        git tag -a ${tagName} -m "${tagMessage}"
+                        git push origin ${tagName} || echo "Tag push failed (may already exist)"
+                    """
+                    
+                    echo "✅ Tagged firmware: ${tagName}"
+                }
+            }
+        }
 
-                sh '''
-                    echo "[ATS] Flashing firmware from Xeon artifact"
-                    ./agent/flash_fw.sh ${FW_ARTIFACT}
-
-                    echo "[ATS] Running hardware tests"
-                    ./agent/run_tests.sh
-                '''
+        stage('Trigger Test Pipeline') {
+            when {
+                expression { params.TRIGGER_TEST == true }
+            }
+            steps {
+                script {
+                    def testJobName = "${env.JOB_NAME}-test"
+                    echo "🚀 Triggering test pipeline: ${testJobName}"
+                    
+                    def testBuild = build job: testJobName, 
+                        parameters: [
+                            string(name: 'BUILD_JOB_NAME', value: env.JOB_NAME),
+                            string(name: 'BUILD_NUMBER', value: env.BUILD_NUMBER.toString()),
+                            string(name: 'FW_ARTIFACT', value: env.FW_ARTIFACT)
+                        ],
+                        wait: false,
+                        propagate: false
+                    
+                    echo "✅ Test pipeline triggered: ${testJobName} #${testBuild.number}"
+                }
             }
         }
     }
 
     post {
         success {
-            echo "✅ Firmware built on Xeon and validated on ATS node"
+            echo "✅ Firmware built and tagged successfully"
         }
         failure {
-            echo "❌ Firmware validation failed"
+            echo "❌ Firmware build failed"
         }
         always {
             node('fw-build') {
-                archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
+                archiveArtifacts artifacts: 'ats-manifest.yaml', allowEmptyArchive: true
             }
         }
     }
