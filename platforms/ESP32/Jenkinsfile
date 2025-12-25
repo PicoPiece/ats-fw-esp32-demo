@@ -105,14 +105,18 @@ EOF
                     def tagName = "${params.TAG_PREFIX}-${env.BUILD_NUMBER}-${env.GIT_COMMIT.take(7)}"
                     def tagMessage = "Firmware build #${env.BUILD_NUMBER} from ${env.GIT_BRANCH}"
                     
-                    sh """
-                        git config user.name "Jenkins"
-                        git config user.email "jenkins@ats-ci"
-                        git tag -a ${tagName} -m "${tagMessage}"
-                        git push origin ${tagName} || echo "Tag push failed (may already exist)"
-                    """
-                    
-                    echo "✅ Tagged firmware: ${tagName}"
+                    try {
+                        sh """
+                            git config user.name "Jenkins"
+                            git config user.email "jenkins@ats-ci"
+                            git tag -a ${tagName} -m "${tagMessage}" || echo "Tag already exists"
+                        """
+                        echo "✅ Tagged firmware locally: ${tagName}"
+                        echo "   Firmware version: ${tagName}"
+                    } catch (Exception e) {
+                        echo "⚠️  Failed to create tag: ${e.getMessage()}"
+                        echo "   This is not critical - build succeeded, artifact is available"
+                    }
                 }
             }
         }
@@ -123,22 +127,39 @@ EOF
             }
             steps {
                 script {
-                    // Test job naming: {base-job}-{platform}-test
-                    // e.g., ats-fw-esp32-demo-ESP32-test
+                    // Test job naming: {folder}/{base-job}-{platform}-test
+                    // e.g., platforms/ESP32/ats-fw-esp32-demo-ESP32-test
                     def testJobName = "${env.JOB_NAME}-${env.PLATFORM}-test"
                     echo "🚀 Triggering test pipeline: ${testJobName}"
+                    echo "   Build #${env.BUILD_NUMBER} → Test pipeline (async, not waiting for result)"
                     
-                    def testBuild = build job: testJobName, 
-                        parameters: [
-                            string(name: 'BUILD_JOB_NAME', value: env.JOB_NAME),
-                            string(name: 'BUILD_NUMBER', value: env.BUILD_NUMBER.toString()),
-                            string(name: 'FW_ARTIFACT', value: env.FW_ARTIFACT),
-                            string(name: 'PLATFORM', value: env.PLATFORM)
-                        ],
-                        wait: false,
-                        propagate: false
-                    
-                    echo "✅ Test pipeline triggered: ${testJobName} #${testBuild.number}"
+                    try {
+                        // Trigger test pipeline asynchronously, don't wait for result
+                        def testBuild = build job: testJobName, 
+                            parameters: [
+                                string(name: 'BUILD_JOB_NAME', value: env.JOB_NAME),
+                                string(name: 'BUILD_NUMBER', value: env.BUILD_NUMBER.toString()),
+                                string(name: 'FW_ARTIFACT', value: env.FW_ARTIFACT),
+                                string(name: 'PLATFORM', value: env.PLATFORM)
+                            ],
+                            wait: false,
+                            propagate: false,
+                            quietPeriod: 0
+                        
+                        // Safely check if build object exists
+                        if (testBuild != null && testBuild.number != null) {
+                            echo "✅ Test pipeline triggered: ${testJobName} #${testBuild.number}"
+                        } else {
+                            echo "✅ Test pipeline scheduled: ${testJobName}"
+                            echo "   Check Jenkins UI for test results"
+                        }
+                    } catch (Exception e) {
+                        // Don't fail build pipeline if test trigger fails
+                        echo "⚠️  Could not trigger test pipeline: ${e.getMessage()}"
+                        echo "   Build succeeded - firmware artifact available"
+                        echo "   Test can be triggered manually from Jenkins UI"
+                        // Continue pipeline execution
+                    }
                 }
             }
         }

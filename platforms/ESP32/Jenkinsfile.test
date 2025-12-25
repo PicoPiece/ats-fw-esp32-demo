@@ -4,8 +4,8 @@ pipeline {
     parameters {
         string(
             name: 'BUILD_JOB_NAME',
-            defaultValue: 'ats-fw-esp32-demo',
-            description: 'Name of the build job that produced the firmware'
+            defaultValue: 'platforms/ESP32/ats-fw-esp32-demo',
+            description: 'Name of the build job that produced the firmware (with folder path)'
         )
         string(
             name: 'BUILD_NUMBER',
