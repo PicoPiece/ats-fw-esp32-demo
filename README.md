@@ -35,10 +35,30 @@ This firmware is built on the Xeon server as part of the CI/CD pipeline.
 
 **Key points:**
 
-- ✅ Firmware is built on the Xeon server
+- ✅ Firmware is built on the Xeon server (build agents with `fw-build` label)
 - ✅ ATS nodes never build firmware
 - ✅ ATS nodes only consume signed/versioned artifacts for hardware validation
 - ✅ **Firmware artifacts produced by this repository are validated using `ats-test-esp32-demo`**
+- ✅ **This repository is responsible ONLY for firmware source code and build pipelines**
+
+## 📋 Repository Responsibilities
+
+### ✅ What This Repository Does
+
+- **Firmware source code** (ESP-IDF project)
+- **Build pipeline** (`Jenkinsfile` in `platforms/ESP32/`)
+- **Artifact generation**:
+  - Firmware binary (`firmware-esp32.bin`)
+  - ATS manifest (`ats-manifest.yaml`) - see [ATS Manifest Spec v1](../ats-platform-docs/architecture/ats-manifest-spec-v1.md)
+- **Git tagging** (local tags for versioning)
+- **Triggering test pipeline** (asynchronous, non-blocking)
+
+### ❌ What This Repository Does NOT Do
+
+- **Hardware testing** → `ats-test-esp32-demo` and `ats-ats-node`
+- **Hardware interaction** (flashing, USB detection) → `ats-ats-node`
+- **Test execution** → `ats-test-esp32-demo`
+- **CI orchestration** → `ats-ci-infra`
 
 ---
 
@@ -58,15 +78,17 @@ This firmware is built on the Xeon server as part of the CI/CD pipeline.
 
 Firmware artifacts are automatically tested using the `ats-test-esp32-demo` framework:
 
-- Test pipeline copies artifacts from build job
-- Test execution runs on ATS nodes (Raspberry Pi)
+- **Build pipeline** (`Jenkinsfile`) triggers test pipeline (`Jenkinsfile.test`) asynchronously
+- **Test pipeline** copies artifacts from build job and runs on ATS nodes (Raspberry Pi)
+- **ATS Node** (`ats-ats-node`) handles all hardware interaction (flashing, USB detection)
+- **Test Runner** (`ats-test-esp32-demo`) executes pure test logic
 - Hardware validation includes:
   - UART boot validation
   - GPIO behavior
   - OLED display
   - Firmware stability
 
-**The firmware repository does not contain test execution logic** — that responsibility belongs to `ats-test-esp32-demo`.
+**The firmware repository does not contain test execution logic** — that responsibility belongs to `ats-test-esp32-demo` and `ats-ats-node`.
 
 ---
 
@@ -98,12 +120,14 @@ Each platform has its own:
 ### ATS Manifest
 
 - **Name:** `ats-manifest.yaml`
+- **Schema:** v1 (see [ATS Manifest Specification v1](../ats-platform-docs/architecture/ats-manifest-spec-v1.md))
 - **Contains:**
   - Build metadata (CI system, job name, build number)
   - Git information (repo, commit, branch)
   - Artifact checksum (SHA256)
   - Device target information
   - Test plan references
+- **Purpose:** Single contract between build, ATS node, test runner, and CI system
 
 ---
 
