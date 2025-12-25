@@ -14,8 +14,13 @@ pipeline {
         )
         string(
             name: 'FW_ARTIFACT',
-            defaultValue: 'firmware.bin',
+            defaultValue: 'firmware-esp32.bin',
             description: 'Firmware artifact name'
+        )
+        string(
+            name: 'PLATFORM',
+            defaultValue: 'ESP32',
+            description: 'Platform name (ESP32, RaspberryPi, nRF52, ...)'
         )
         string(
             name: 'ATS_NODE_LABEL',
@@ -60,12 +65,15 @@ pipeline {
             agent { label "${params.ATS_NODE_LABEL}" }
             steps {
                 sh '''
-                    echo "[ATS] Flashing firmware: ${FW_ARTIFACT}"
+                    echo "[ATS] Flashing ${PLATFORM} firmware: ${FW_ARTIFACT}"
                     if [ -f ./agent/flash_fw.sh ]; then
                         chmod +x ./agent/flash_fw.sh
-                        ./agent/flash_fw.sh ${FW_ARTIFACT}
+                        ./agent/flash_fw.sh ${FW_ARTIFACT} ${PLATFORM}
+                    elif [ -f ./agent/flash_${PLATFORM,,}.sh ]; then
+                        chmod +x ./agent/flash_${PLATFORM,,}.sh
+                        ./agent/flash_${PLATFORM,,}.sh ${FW_ARTIFACT}
                     else
-                        echo "⚠️  flash_fw.sh not found, skipping flash"
+                        echo "⚠️  Flash script not found for ${PLATFORM}, skipping flash"
                     fi
                 '''
             }

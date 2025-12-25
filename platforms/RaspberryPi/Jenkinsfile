@@ -14,19 +14,20 @@ pipeline {
         )
         string(
             name: 'TAG_PREFIX',
-            defaultValue: 'fw',
-            description: 'Prefix for firmware tag (e.g., fw, v, release)'
+            defaultValue: 'raspi-img',
+            description: 'Prefix for image tag (e.g., raspi-img, v, release)'
         )
     }
 
     environment {
-        FW_ARTIFACT = "firmware.bin"
+        PLATFORM = "RaspberryPi"
+        IMAGE_ARTIFACT = "raspberrypi-image.img"
     }
 
     stages {
 
         stage('Checkout Source') {
-            agent { label 'fw-build' }   // 🚨 Xeon build agent
+            agent { label 'fw-build' }
             steps {
                 checkout([
                     $class: 'GitSCM',
@@ -39,31 +40,31 @@ pipeline {
             }
         }
 
-        stage('Build ESP32 Firmware (Xeon)') {
-            agent { label 'fw-build' }   // 🚨 build ONLY here
+        stage('Build Raspberry Pi Image') {
+            agent { label 'fw-build' }
             steps {
                 sh '''
-                    export ESPRESSIF_HOME=/home/jenkins/.espressif
-                    . /opt/esp/idf/export.sh
-                    idf.py set-target esp32
-                    idf.py build
-                    cp build/*.bin ${FW_ARTIFACT}
+                    echo "[${PLATFORM}] Building image..."
+                    # TODO: Add actual build commands for Raspberry Pi
+                    # Example: docker build, yocto, buildroot, etc.
+                    touch ${IMAGE_ARTIFACT}
+                    echo "Image built: ${IMAGE_ARTIFACT}"
                 '''
             }
         }
 
-        stage('Archive Firmware Artifact (Xeon)') {
+        stage('Archive Image Artifact') {
             agent { label 'fw-build' }
             steps {
-                archiveArtifacts artifacts: "${FW_ARTIFACT}", fingerprint: true
+                archiveArtifacts artifacts: "${IMAGE_ARTIFACT}", fingerprint: true
             }
         }
 
-        stage('Generate ATS Manifest (Xeon)') {
+        stage('Generate ATS Manifest') {
             agent { label 'fw-build' }
             steps {
                 sh '''
-                    SHA256=$(sha256sum ${FW_ARTIFACT} | awk '{print $1}')
+                    SHA256=$(sha256sum ${IMAGE_ARTIFACT} | awk '{print $1}')
 
                     cat <<EOF > ats-manifest.yaml
 manifest_version: 1
@@ -77,17 +78,18 @@ build:
     commit: ${GIT_COMMIT}
     branch: ${GIT_BRANCH}
   artifact:
-    name: ${FW_ARTIFACT}
+    name: ${IMAGE_ARTIFACT}
     checksum: sha256:${SHA256}
     build_node: xeon-fw-build
 
 device:
-  target: esp32
-  board: esp32-devkit
+  target: raspberrypi
+  board: raspberrypi-4
 
 test_plan:
-  - gpio_toggle_test
-  - oled_display_test
+  - boot_test
+  - gpio_test
+  - network_test
 
 timestamps:
   build_time: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -97,12 +99,12 @@ EOF
             }
         }
 
-        stage('Tag Firmware') {
+        stage('Tag Image') {
             agent { label 'fw-build' }
             steps {
                 script {
                     def tagName = "${params.TAG_PREFIX}-${env.BUILD_NUMBER}-${env.GIT_COMMIT.take(7)}"
-                    def tagMessage = "Firmware build #${env.BUILD_NUMBER} from ${env.GIT_BRANCH}"
+                    def tagMessage = "Raspberry Pi image build #${env.BUILD_NUMBER} from ${env.GIT_BRANCH}"
                     
                     sh """
                         git config user.name "Jenkins"
@@ -111,7 +113,7 @@ EOF
                         git push origin ${tagName} || echo "Tag push failed (may already exist)"
                     """
                     
-                    echo "✅ Tagged firmware: ${tagName}"
+                    echo "✅ Tagged image: ${tagName}"
                 }
             }
         }
@@ -122,14 +124,15 @@ EOF
             }
             steps {
                 script {
-                    def testJobName = "${env.JOB_NAME}-test"
+                    def testJobName = "${env.JOB_NAME}-${env.PLATFORM}-test"
                     echo "🚀 Triggering test pipeline: ${testJobName}"
                     
                     def testBuild = build job: testJobName, 
                         parameters: [
                             string(name: 'BUILD_JOB_NAME', value: env.JOB_NAME),
                             string(name: 'BUILD_NUMBER', value: env.BUILD_NUMBER.toString()),
-                            string(name: 'FW_ARTIFACT', value: env.FW_ARTIFACT)
+                            string(name: 'FW_ARTIFACT', value: env.IMAGE_ARTIFACT),
+                            string(name: 'PLATFORM', value: env.PLATFORM)
                         ],
                         wait: false,
                         propagate: false
@@ -142,10 +145,10 @@ EOF
 
     post {
         success {
-            echo "✅ Firmware built and tagged successfully"
+            echo "✅ Image built and tagged successfully"
         }
         failure {
-            echo "❌ Firmware build failed"
+            echo "❌ Image build failed"
         }
         always {
             node('fw-build') {
@@ -154,3 +157,4 @@ EOF
         }
     }
 }
+
