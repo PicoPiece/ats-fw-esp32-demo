@@ -477,8 +477,11 @@ pipeline {
                         echo "   Found \$FILE_COUNT items in mounted directory"
                         echo ""
                         
-                        # Mount workspace FIRST to avoid conflicts with other mounts
-                        # Then mount hardware devices
+                        # Run test container with workspace mount
+                        # Mount workspace FIRST, then hardware devices
+                        echo "🚀 Running ATS test container..."
+                        echo "   Workspace mount: \${WORKSPACE_ABS} -> /workspace"
+                        
                         docker run --rm --privileged \\
                             -v "\${WORKSPACE_ABS}:/workspace" \\
                             -v /dev:/dev \\
@@ -488,7 +491,21 @@ pipeline {
                             -e RESULTS_DIR=/workspace/${RESULTS_DIR} \\
                             ${params.ATS_NODE_TEST_IMAGE}
                         
-                        echo "✅ Test execution completed"
+                        EXIT_CODE=\$?
+                        
+                        # If we used alternative path, copy results back
+                        if [ "\${WORKSPACE_ABS}" != "\$(pwd)" ] && [ -d "\${WORKSPACE_ABS}/${RESULTS_DIR}" ]; then
+                            echo "📦 Copying results back from alternative path..."
+                            cp -r "\${WORKSPACE_ABS}/${RESULTS_DIR}"/* "\$(pwd)/${RESULTS_DIR}/" 2>/dev/null || true
+                            rm -rf "\${WORKSPACE_ABS}" 2>/dev/null || true
+                        fi
+                        
+                        if [ \$EXIT_CODE -eq 0 ]; then
+                            echo "✅ Test execution completed successfully"
+                        else
+                            echo "❌ Test execution failed with exit code: \$EXIT_CODE"
+                        fi
+                        
                         echo "📊 Results:"
                         ls -la ${RESULTS_DIR}/ || echo "   No results found"
                     """
