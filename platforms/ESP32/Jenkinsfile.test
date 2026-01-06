@@ -140,18 +140,16 @@ pipeline {
                     if (params.IMAGE_SOURCE == 'registry') {
                         // Option 1: Pull from registry (fast, recommended)
                         echo "📥 Pulling ATS node test image from registry..."
-                        sh """
-                            if docker pull ${params.ATS_NODE_TEST_IMAGE}; then
-                                echo "✅ Image pulled successfully: ${params.ATS_NODE_TEST_IMAGE}"
-                            else
-                                echo "⚠️  Failed to pull image from registry, falling back to build..."
-                                IMAGE_SOURCE='build'
-                            fi
-                        """
+                        def pullSuccess = sh(
+                            script: "docker pull ${params.ATS_NODE_TEST_IMAGE}",
+                            returnStatus: true
+                        ) == 0
                         
-                        // If pull failed, fall back to build
-                        if (env.IMAGE_SOURCE == 'build' || currentBuild.result == 'FAILURE') {
-                            echo "🔨 Building image locally (fallback)..."
+                        if (pullSuccess) {
+                            echo "✅ Image pulled successfully: ${params.ATS_NODE_TEST_IMAGE}"
+                        } else {
+                            echo "⚠️  Failed to pull image from registry, falling back to build..."
+                            // Fall back to build
                             def atsNodeRepo = "${WORKSPACE_DIR}/ats-ats-node"
                             sh """
                                 if [ ! -d "${atsNodeRepo}" ]; then
@@ -164,7 +162,7 @@ pipeline {
                                 fi
                                 
                                 if [ -d "${atsNodeRepo}/docker/ats-node-test" ]; then
-                                    echo "🐳 Building ATS node test container..."
+                                    echo "🐳 Building ATS node test container (fallback)..."
                                     cd ${atsNodeRepo}/docker/ats-node-test
                                     docker build -t ${params.ATS_NODE_TEST_IMAGE} .
                                     echo "✅ Container built: ${params.ATS_NODE_TEST_IMAGE}"
