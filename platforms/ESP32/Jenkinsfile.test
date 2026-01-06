@@ -209,13 +209,24 @@ pipeline {
                                         echo "❌ Failed to clone ats-ats-node"
                                         exit 1
                                     }
+                                else
+                                    echo "📦 Updating ats-ats-node repository..."
+                                    cd ${atsNodeRepo}
+                                    git pull || echo "⚠️  Git pull failed, using existing code"
                                 fi
                                 
                                 if [ -d "${atsNodeRepo}/docker/ats-node-test" ]; then
                                     echo "🐳 Building ATS node test container (fallback)..."
+                                    echo "   Using latest code from: ${atsNodeRepo}"
+                                    echo "   Entrypoint version check:"
+                                    head -20 ${atsNodeRepo}/docker/ats-node-test/entrypoint.sh | grep -E "(Step 1|CRITICAL|workspace)" || echo "   (checking entrypoint)"
+                                    echo ""
                                     cd ${atsNodeRepo}/docker/ats-node-test
-                                    docker build -t ${params.ATS_NODE_TEST_IMAGE} .
+                                    docker build --no-cache -t ${params.ATS_NODE_TEST_IMAGE} .
                                     echo "✅ Container built: ${params.ATS_NODE_TEST_IMAGE}"
+                                    echo ""
+                                    echo "🔍 Verifying entrypoint in built image:"
+                                    docker run --rm ${params.ATS_NODE_TEST_IMAGE} sh -c "head -30 /app/entrypoint.sh | grep -E '(Step 1|CRITICAL|workspace)' || echo 'Entrypoint check'" || true
                                 else
                                     echo "❌ Dockerfile not found: ${atsNodeRepo}/docker/ats-node-test"
                                     exit 1
@@ -235,13 +246,18 @@ pipeline {
                                     echo "❌ Failed to clone ats-ats-node"
                                     exit 1
                                 }
+                            else
+                                echo "📦 Updating ats-ats-node repository..."
+                                cd ${atsNodeRepo}
+                                git pull || echo "⚠️  Git pull failed, using existing code"
                             fi
                             
                             # Build ats-node-test container
                             if [ -d "${atsNodeRepo}/docker/ats-node-test" ]; then
                                 echo "🐳 Building ATS node test container..."
+                                echo "   Using latest code from: ${atsNodeRepo}"
                                 cd ${atsNodeRepo}/docker/ats-node-test
-                                docker build -t ${params.ATS_NODE_TEST_IMAGE} .
+                                docker build --no-cache -t ${params.ATS_NODE_TEST_IMAGE} .
                                 echo "✅ Container built: ${params.ATS_NODE_TEST_IMAGE}"
                             else
                                 echo "❌ Dockerfile not found: ${atsNodeRepo}/docker/ats-node-test"
