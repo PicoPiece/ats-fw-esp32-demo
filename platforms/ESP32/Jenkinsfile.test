@@ -275,6 +275,20 @@ pipeline {
                         # Create results directory
                         mkdir -p ${RESULTS_DIR}
                         
+                        # Ensure manifest is readable by container (fix permissions if needed)
+                        chmod 644 ats-manifest.yaml || true
+                        echo "🔍 File permissions:"
+                        ls -lah ats-manifest.yaml
+                        echo ""
+                        
+                        # Test container can see and read the file
+                        echo "🔍 Testing container file access:"
+                        docker run --rm \\
+                            -v \$(pwd):/workspace \\
+                            ${params.ATS_NODE_TEST_IMAGE} \\
+                            sh -c "echo 'Container user:' && whoami && echo 'Container can see:' && ls -lah /workspace/ats-manifest.yaml 2>&1 && echo 'Container can read:' && test -f /workspace/ats-manifest.yaml && echo '✅ File exists' || echo '❌ File not found'"
+                        echo ""
+                        
                         # Run ats-node-test container
                         # Container will:
                         # 1. Load manifest from /workspace/ats-manifest.yaml
