@@ -14,7 +14,7 @@ pipeline {
         )
         string(
             name: 'ATS_NODE_LABEL',
-            defaultValue: 'ats-node',
+            defaultValue: 'raspi-ats-01',
             description: 'Label for ATS node pool (e.g., ats-node, ats-pi-01)'
         )
         string(
