@@ -168,7 +168,16 @@ pipeline {
                         echo "📥 Pulling ATS node test image from registry..."
                         echo "   Image: ${params.ATS_NODE_TEST_IMAGE}"
                         
+<<<<<<< HEAD
                         def pullOutput = sh(
+=======
+                        sh """
+                            echo "   Platform: \$(uname -m)"
+                            echo "   Architecture: \$(uname -a)"
+                        """
+                        
+                        def pullSuccess = sh(
+>>>>>>> 059080b (fix: Improve registry pull error handling and diagnostics)
                             script: "docker pull ${params.ATS_NODE_TEST_IMAGE} 2>&1",
                             returnStatus: true
                         )
@@ -178,11 +187,30 @@ pipeline {
                             echo "✅ Image pulled successfully: ${params.ATS_NODE_TEST_IMAGE}"
                         } else {
                             echo "⚠️  Failed to pull image from registry"
+<<<<<<< HEAD
                             echo "   Common reasons:"
                             echo "   1. Image is private and requires authentication"
                             echo "   2. Image doesn't exist on registry"
                             echo "   3. Network/registry connectivity issue"
                             echo ""
+=======
+                            echo ""
+                            sh """
+                                echo "   Error details:"
+                                docker pull ${params.ATS_NODE_TEST_IMAGE} 2>&1 | head -5 || true
+                                echo ""
+                                echo "   Common reasons:"
+                                echo "   1. Image is private and requires authentication"
+                                echo "      → Setup Docker credentials in Jenkins or use 'build' option"
+                                echo "   2. Image doesn't exist for this platform (\$(uname -m))"
+                                echo "      → Check registry for available platforms"
+                                echo "   3. Network/registry connectivity issue"
+                                echo "      → Check network/firewall settings"
+                                echo ""
+                                echo "   Note: Falling back to local build (this may take longer)"
+                                echo ""
+                            """
+>>>>>>> 059080b (fix: Improve registry pull error handling and diagnostics)
                             echo "   Falling back to build on agent..."
                             // Fall back to build
                             def atsNodeRepo = "${WORKSPACE_DIR}/ats-ats-node"
