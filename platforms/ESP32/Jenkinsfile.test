@@ -61,7 +61,7 @@ pipeline {
                         projectName: params.BUILD_JOB_NAME,
                         selector: [
                             $class: 'SpecificBuildSelector',
-                            buildNumber: params.BUILD_NUMBER.toInteger()
+                            buildNumber: params.BUILD_NUMBER.toString()
                         ],
                         filter: "*.bin,ats-manifest.yaml",
                         target: WORKSPACE_DIR,
