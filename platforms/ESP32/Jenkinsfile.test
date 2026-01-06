@@ -426,12 +426,38 @@ pipeline {
                         # 4. Write results to /workspace/results/
                         
                         echo "🔍 Testing volume mount before running container..."
-                        docker run --rm -v "\${WORKSPACE_ABS}:/workspace" alpine:latest sh -c "ls -lah /workspace/ | head -10" || {
+                        echo "   Mount source (host): \${WORKSPACE_ABS}"
+                        echo "   Verifying source exists and has files..."
+                        ls -lah "\${WORKSPACE_ABS}/" | head -5 || echo "   ⚠️  Cannot list source directory"
+                        
+                        # Test mount - check if files are actually visible
+                        MOUNT_TEST_OUTPUT=\$(docker run --rm -v "\${WORKSPACE_ABS}:/workspace" alpine:latest sh -c "ls -lah /workspace/ | head -10" 2>&1)
+                        MOUNT_TEST_EXIT=\$?
+                        
+                        if [ \$MOUNT_TEST_EXIT -ne 0 ]; then
                             echo "❌ ERROR: Volume mount test failed!"
+                            echo "   Output: \$MOUNT_TEST_OUTPUT"
                             echo "   This indicates a Docker mount issue on this system"
                             exit 1
-                        }
+                        fi
+                        
+                        # Check if mount test actually shows files (not just . and ..)
+                        FILE_COUNT=\$(echo "\$MOUNT_TEST_OUTPUT" | grep -v "^\\.\\.\\?\$" | grep -v "^total" | wc -l)
+                        if [ \$FILE_COUNT -lt 2 ]; then
+                            echo "⚠️  WARNING: Mount test shows empty directory!"
+                            echo "   Output: \$MOUNT_TEST_OUTPUT"
+                            echo "   This suggests the mount is not working correctly"
+                            echo "   Files should be visible but are not"
+                            echo ""
+                            echo "   Troubleshooting:"
+                            echo "   1. Check if path is correct: \${WORKSPACE_ABS}"
+                            echo "   2. Verify Docker can access host paths"
+                            echo "   3. Check if running inside another container (nested mount issue)"
+                            exit 1
+                        fi
+                        
                         echo "✅ Volume mount test successful - files are accessible"
+                        echo "   Found \$FILE_COUNT items in mounted directory"
                         echo ""
                         
                         # Mount workspace FIRST to avoid conflicts with other mounts
