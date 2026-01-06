@@ -25,7 +25,7 @@ pipeline {
         string(
             name: 'ATS_NODE_TEST_IMAGE',
             defaultValue: 'ghcr.io/picopiece/ats-node-test:latest',
-            description: 'Docker image name for ATS node test container (registry or local)'
+            description: 'Docker image name for ATS node test container (must be lowercase for registry)'
         )
         string(
             name: 'TEST_REPO_URL',
