@@ -401,11 +401,21 @@ pipeline {
                         # 2. Flash firmware
                         # 3. Run tests
                         # 4. Write results to /workspace/results/
+                        
+                        echo "🔍 Testing volume mount before running container..."
+                        docker run --rm -v "\${WORKSPACE_ABS}:/workspace" alpine:latest sh -c "ls -lah /workspace/ | head -10" || {
+                            echo "❌ ERROR: Volume mount test failed!"
+                            echo "   This indicates a Docker mount issue on this system"
+                            exit 1
+                        }
+                        echo "✅ Volume mount test successful - files are accessible"
+                        echo ""
+                        
                         docker run --rm --privileged \\
                             -v /dev:/dev \\
                             -v /sys/class/gpio:/sys/class/gpio:ro \\
                             -v /dev/gpiomem:/dev/gpiomem \\
-                            -v \${WORKSPACE_ABS}:/workspace \\
+                            -v "\${WORKSPACE_ABS}:/workspace" \\
                             -e MANIFEST_PATH=/workspace/ats-manifest.yaml \\
                             -e RESULTS_DIR=/workspace/${RESULTS_DIR} \\
                             ${params.ATS_NODE_TEST_IMAGE}
