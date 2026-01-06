@@ -294,12 +294,10 @@ pipeline {
                         ls -ld .
                         echo ""
                         
-                        # Test container can see and read the file
-                        echo "🔍 Testing container file access:"
-                        docker run --rm --entrypoint sh \\
-                            -v \$(pwd):/workspace \\
-                            ${params.ATS_NODE_TEST_IMAGE} \\
-                            -c "echo 'Container user:' && whoami && echo 'UID:' && id -u && echo 'GID:' && id -g && echo '' && echo 'Workspace mount test:' && ls -lah /workspace/ | head -10 && echo '' && echo 'Manifest file test:' && ls -lah /workspace/ats-manifest.yaml 2>&1 && echo '' && echo 'File existence test:' && test -f /workspace/ats-manifest.yaml && echo '✅ File exists and is readable' || (echo '❌ File not found or not readable' && echo 'Trying to read:' && cat /workspace/ats-manifest.yaml 2>&1 || echo 'Cannot read file')"
+                        # Test container can see and read the file (skip for now, run actual container)
+                        echo "🔍 Verifying workspace before container run:"
+                        echo "   Manifest: \$(pwd)/ats-manifest.yaml"
+                        test -f ats-manifest.yaml && echo "   ✅ Manifest exists on host" || echo "   ❌ Manifest missing on host"
                         echo ""
                         
                         # Run ats-node-test container
