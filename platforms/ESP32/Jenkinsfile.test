@@ -192,7 +192,7 @@ pipeline {
                         ) == 0
                         
                         if (pullSuccess) {
-                            echo "✅ Image pulled successfully: ${params.ATS_NODE_TEST_IMAGE}"
+                            echo "✅ Image pulled successfully: ${imageToPull}"
                         } else {
                             echo "⚠️  Failed to pull image from registry"
                             echo ""
