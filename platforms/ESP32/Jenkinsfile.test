@@ -410,12 +410,29 @@ pipeline {
                         echo ""
                         
                         # Get absolute path for workspace (important for Docker mounts)
+                        # CRITICAL: If running inside agent container, we need the HOST path
+                        # Agent container mounts /home/jenkins (host) -> /home/jenkins/agent (container)
+                        # So if pwd is /home/jenkins/agent/workspace/..., host path is /home/jenkins/workspace/...
                         WORKSPACE_ABS=\$(pwd)
-                        echo "🔍 Workspace absolute path: \${WORKSPACE_ABS}"
-                        echo "🔍 Verifying files exist before mount:"
-                        ls -lah \${WORKSPACE_ABS}/ats-manifest.yaml || echo "⚠️  File not found at expected path"
-                        echo "🔍 All files in workspace:"
-                        ls -lah \${WORKSPACE_ABS}/ | head -15
+                        echo "🔍 Workspace path (container): \${WORKSPACE_ABS}"
+                        
+                        # Check if we're inside agent container and need to convert to host path
+                        # If path starts with /home/jenkins/agent, convert to /home/jenkins
+                        if echo "\${WORKSPACE_ABS}" | grep -q "^/home/jenkins/agent"; then
+                            HOST_WORKSPACE_ABS=\$(echo "\${WORKSPACE_ABS}" | sed 's|^/home/jenkins/agent|/home/jenkins|')
+                            echo "🔍 Converting container path to host path:"
+                            echo "   Container: \${WORKSPACE_ABS}"
+                            echo "   Host:      \${HOST_WORKSPACE_ABS}"
+                            WORKSPACE_ABS="\${HOST_WORKSPACE_ABS}"
+                        else
+                            echo "🔍 Using path as-is (assuming host path): \${WORKSPACE_ABS}"
+                        fi
+                        
+                        echo "🔍 Final workspace path for Docker mount: \${WORKSPACE_ABS}"
+                        echo "🔍 Verifying files exist at host path:"
+                        ls -lah "\${WORKSPACE_ABS}/ats-manifest.yaml" || echo "⚠️  File not found at host path"
+                        echo "🔍 All files in workspace (host):"
+                        ls -lah "\${WORKSPACE_ABS}/" | head -15 || echo "⚠️  Cannot list host directory"
                         echo ""
                         
                         # Run ats-node-test container
@@ -426,7 +443,7 @@ pipeline {
                         # 4. Write results to /workspace/results/
                         
                         echo "🔍 Testing volume mount before running container..."
-                        echo "   Mount source (host): \${WORKSPACE_ABS}"
+                        echo "   Mount source (HOST path): \${WORKSPACE_ABS}"
                         echo "   Verifying source exists and has files..."
                         ls -lah "\${WORKSPACE_ABS}/" | head -5 || echo "   ⚠️  Cannot list source directory"
                         
