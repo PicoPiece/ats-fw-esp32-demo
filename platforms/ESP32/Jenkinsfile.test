@@ -185,6 +185,16 @@ pipeline {
                         def ghcrCredsId = params.GHCR_CREDENTIALS_ID ?: env.GHCR_CREDENTIALS_ID ?: ''
                         def pullSuccess = false
                         
+                        // #region agent log
+                        echo """
+                        🔍 DEBUG: Credentials check
+                          params.GHCR_CREDENTIALS_ID: ${params.GHCR_CREDENTIALS_ID ?: 'NOT SET'}
+                          env.GHCR_CREDENTIALS_ID: ${env.GHCR_CREDENTIALS_ID ?: 'NOT SET'}
+                          Final ghcrCredsId: ${ghcrCredsId ?: 'EMPTY'}
+                          Image to pull: ${imageToPull}
+                        """
+                        // #endregion
+                        
                         if (ghcrCredsId && ghcrCredsId != '') {
                             echo "🔐 Attempting to login to GHCR with credentials ID: ${ghcrCredsId}"
                             try {
@@ -192,45 +202,83 @@ pipeline {
                                                  usernameVariable: 'GHCR_USER',
                                                  passwordVariable: 'GHCR_TOKEN')]) {
                                     sh """
+                                        # #region agent log
+                                        echo "DEBUG: GHCR_USER length: \${#GHCR_USER}"
+                                        echo "DEBUG: GHCR_TOKEN length: \${#GHCR_TOKEN}"
+                                        echo "DEBUG: GHCR_TOKEN starts with: \${GHCR_TOKEN:0:10}..."
+                                        # #endregion
+                                        
                                         echo "Logging into GHCR..."
-                                        echo "\$GHCR_TOKEN" | docker login ghcr.io -u "\$GHCR_USER" --password-stdin
-                                        echo "✅ GHCR login successful"
+                                        LOGIN_OUTPUT=\$(echo "\$GHCR_TOKEN" | docker login ghcr.io -u "\$GHCR_USER" --password-stdin 2>&1)
+                                        LOGIN_EXIT=\$?
+                                        echo "\$LOGIN_OUTPUT"
                                         
-                                        echo "📥 Pulling image: ${imageToPull}"
-                                        docker pull ${imageToPull}
-                                        
-                                        # Tag with the expected name for consistency
-                                        docker tag ${imageToPull} ${params.ATS_NODE_TEST_IMAGE} || true
+                                        if [ \$LOGIN_EXIT -eq 0 ]; then
+                                            echo "✅ GHCR login successful"
+                                            
+                                            # #region agent log
+                                            echo "DEBUG: Verifying login by checking docker config"
+                                            cat ~/.docker/config.json | grep -A 2 "ghcr.io" || echo "DEBUG: No ghcr.io entry in docker config"
+                                            # #endregion
+                                            
+                                            echo "📥 Pulling image: ${imageToPull}"
+                                            PULL_OUTPUT=\$(docker pull ${imageToPull} 2>&1)
+                                            PULL_EXIT=\$?
+                                            echo "\$PULL_OUTPUT"
+                                            
+                                            if [ \$PULL_EXIT -eq 0 ]; then
+                                                echo "✅ Image pulled successfully"
+                                                docker tag ${imageToPull} ${params.ATS_NODE_TEST_IMAGE} || true
+                                            else
+                                                echo "❌ Image pull failed with exit code: \$PULL_EXIT"
+                                                exit 1
+                                            fi
+                                        else
+                                            echo "❌ GHCR login failed with exit code: \$LOGIN_EXIT"
+                                            echo "   Output: \$LOGIN_OUTPUT"
+                                            exit 1
+                                        fi
                                     """
                                 }
                                 pullSuccess = true
                                 echo "✅ Image pulled successfully: ${imageToPull}"
                             } catch (Exception e) {
                                 echo "⚠️  Failed to use credentials ${ghcrCredsId}: ${e.getMessage()}"
+                                echo "   Exception type: ${e.getClass().getName()}"
                                 echo "   Will try pull without login (works if image is public)"
                                 
                                 // Fallback: try pull without credentials
-                                pullSuccess = sh(
+                                def pullOutput = sh(
                                     script: "docker pull ${imageToPull} 2>&1",
                                     returnStatus: true
-                                ) == 0
+                                )
+                                pullSuccess = pullOutput == 0
                                 
                                 if (pullSuccess) {
                                     echo "✅ Image pulled successfully (public): ${imageToPull}"
                                     sh "docker tag ${imageToPull} ${params.ATS_NODE_TEST_IMAGE} || true"
+                                } else {
+                                    echo "❌ Public pull also failed"
                                 }
                             }
                         } else {
                             echo "ℹ️  No GHCR credentials provided, trying public pull..."
-                            pullSuccess = sh(
+                            // #region agent log
+                            echo "DEBUG: Attempting public pull for: ${imageToPull}"
+                            echo "DEBUG: Platform: \$(uname -m)"
+                            // #endregion
+                            
+                            def pullOutput = sh(
                                 script: "docker pull ${imageToPull} 2>&1",
                                 returnStatus: true
-                            ) == 0
+                            )
+                            pullSuccess = pullOutput == 0
                             
                             if (pullSuccess) {
                                 echo "✅ Image pulled successfully: ${imageToPull}"
-                                // Tag with the expected name for consistency
                                 sh "docker tag ${imageToPull} ${params.ATS_NODE_TEST_IMAGE} || true"
+                            } else {
+                                echo "❌ Public pull failed - image may be private or not exist"
                             }
                         }
                         
