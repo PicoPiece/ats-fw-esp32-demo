@@ -166,15 +166,24 @@ pipeline {
                     if (params.IMAGE_SOURCE == 'registry') {
                         // Option 1: Pull from registry (fast, recommended)
                         echo "📥 Pulling ATS node test image from registry..."
-                        def pullSuccess = sh(
-                            script: "docker pull ${params.ATS_NODE_TEST_IMAGE}",
+                        echo "   Image: ${params.ATS_NODE_TEST_IMAGE}"
+                        
+                        def pullOutput = sh(
+                            script: "docker pull ${params.ATS_NODE_TEST_IMAGE} 2>&1",
                             returnStatus: true
-                        ) == 0
+                        )
+                        def pullSuccess = pullOutput == 0
                         
                         if (pullSuccess) {
                             echo "✅ Image pulled successfully: ${params.ATS_NODE_TEST_IMAGE}"
                         } else {
-                            echo "⚠️  Failed to pull image from registry, falling back to build..."
+                            echo "⚠️  Failed to pull image from registry"
+                            echo "   Common reasons:"
+                            echo "   1. Image is private and requires authentication"
+                            echo "   2. Image doesn't exist on registry"
+                            echo "   3. Network/registry connectivity issue"
+                            echo ""
+                            echo "   Falling back to build on agent..."
                             // Fall back to build
                             def atsNodeRepo = "${WORKSPACE_DIR}/ats-ats-node"
                             sh """
