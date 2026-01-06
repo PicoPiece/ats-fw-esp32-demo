@@ -168,32 +168,20 @@ pipeline {
                         echo "📥 Pulling ATS node test image from registry..."
                         echo "   Image: ${params.ATS_NODE_TEST_IMAGE}"
                         
-<<<<<<< HEAD
-                        def pullOutput = sh(
-=======
                         sh """
                             echo "   Platform: \$(uname -m)"
                             echo "   Architecture: \$(uname -a)"
                         """
                         
                         def pullSuccess = sh(
->>>>>>> 059080b (fix: Improve registry pull error handling and diagnostics)
                             script: "docker pull ${params.ATS_NODE_TEST_IMAGE} 2>&1",
                             returnStatus: true
-                        )
-                        def pullSuccess = pullOutput == 0
+                        ) == 0
                         
                         if (pullSuccess) {
                             echo "✅ Image pulled successfully: ${params.ATS_NODE_TEST_IMAGE}"
                         } else {
                             echo "⚠️  Failed to pull image from registry"
-<<<<<<< HEAD
-                            echo "   Common reasons:"
-                            echo "   1. Image is private and requires authentication"
-                            echo "   2. Image doesn't exist on registry"
-                            echo "   3. Network/registry connectivity issue"
-                            echo ""
-=======
                             echo ""
                             sh """
                                 echo "   Error details:"
@@ -210,7 +198,6 @@ pipeline {
                                 echo "   Note: Falling back to local build (this may take longer)"
                                 echo ""
                             """
->>>>>>> 059080b (fix: Improve registry pull error handling and diagnostics)
                             echo "   Falling back to build on agent..."
                             // Fall back to build
                             def atsNodeRepo = "${WORKSPACE_DIR}/ats-ats-node"
@@ -322,10 +309,12 @@ pipeline {
                         ls -ld .
                         echo ""
                         
-                        # Test container can see and read the file (skip for now, run actual container)
-                        echo "🔍 Verifying workspace before container run:"
-                        echo "   Manifest: \$(pwd)/ats-manifest.yaml"
-                        test -f ats-manifest.yaml && echo "   ✅ Manifest exists on host" || echo "   ❌ Manifest missing on host"
+                        # Test container can see and read the file
+                        echo "🔍 Testing container file access:"
+                        docker run --rm --entrypoint sh \\
+                            -v \$(pwd):/workspace \\
+                            ${params.ATS_NODE_TEST_IMAGE} \\
+                            -c "echo 'Container user:' && whoami && echo 'UID:' && id -u && echo 'GID:' && id -g && echo '' && echo 'Workspace mount test:' && ls -lah /workspace/ | head -10 && echo '' && echo 'Manifest file test:' && ls -lah /workspace/ats-manifest.yaml 2>&1 && echo '' && echo 'File existence test:' && test -f /workspace/ats-manifest.yaml && echo '✅ File exists and is readable' || (echo '❌ File not found or not readable' && echo 'Trying to read:' && cat /workspace/ats-manifest.yaml 2>&1 || echo 'Cannot read file')"
                         echo ""
                         
                         # Run ats-node-test container
