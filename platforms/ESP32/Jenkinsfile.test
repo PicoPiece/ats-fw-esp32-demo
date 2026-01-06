@@ -467,13 +467,33 @@ pipeline {
                             HOST_TMP="/tmp/jenkins-workspace-\$(date +%s)"
                             mkdir -p "\${HOST_TMP}"
                             echo "   Copying workspace to: \${HOST_TMP}"
-                            cp -r \${WORKSPACE_ABS}/* "\${HOST_TMP}/" || {
+                            
+                            # Copy files with proper handling
+                            cd \${WORKSPACE_ABS}
+                            cp -r . "\${HOST_TMP}/" || {
                                 echo "   ❌ Failed to copy files"
                                 exit 1
                             }
-                            WORKSPACE_ABS="\${HOST_TMP}"
-                            echo "   ✅ Using alternative path: \${WORKSPACE_ABS}"
-                            echo "   ⚠️  Note: Results will need to be copied back"
+                            
+                            # Verify files were copied
+                            echo "   Verifying copied files:"
+                            ls -lah "\${HOST_TMP}/" | head -10
+                            
+                            # Test mount with copied files
+                            echo "   Testing mount with copied files..."
+                            COPY_TEST=\$(docker run --rm -v "\${HOST_TMP}:/workspace" alpine:latest sh -c "test -f /workspace/ats-manifest.yaml && echo 'FILE_EXISTS' || echo 'FILE_MISSING'" 2>&1)
+                            
+                            if echo "\$COPY_TEST" | grep -q "FILE_EXISTS"; then
+                                echo "   ✅ Copy successful - files accessible in container"
+                                WORKSPACE_ABS="\${HOST_TMP}"
+                                echo "   ✅ Using alternative path: \${WORKSPACE_ABS}"
+                                echo "   ⚠️  Note: Results will need to be copied back"
+                            else
+                                echo "   ❌ Copy failed - files still not accessible"
+                                echo "   Test output: \$COPY_TEST"
+                                echo "   This indicates a deeper Docker-in-Docker issue"
+                                exit 1
+                            fi
                         fi
                         echo ""
                         
