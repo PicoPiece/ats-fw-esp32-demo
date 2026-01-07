@@ -691,9 +691,42 @@ pipeline {
             agent { label "${params.ATS_NODE_LABEL}" }
             steps {
                 dir(WORKSPACE_DIR) {
-                    archiveArtifacts artifacts: "${RESULTS_DIR}/**", allowEmptyArchive: true
-                    // publishTestResults requires JUnit plugin - using junit step instead
-                    junit testResults: "${RESULTS_DIR}/**/*.xml", allowEmptyResults: true
+                    script {
+                        // Verify results exist before archiving
+                        def resultsDir = new File("${RESULTS_DIR}")
+                        if (resultsDir.exists()) {
+                            echo "📦 Archiving results from ${RESULTS_DIR}"
+                            def files = resultsDir.listFiles()
+                            if (files) {
+                                files.each { file ->
+                                    echo "   - ${file.name} (${file.length()} bytes)"
+                                }
+                            } else {
+                                echo "   ⚠️  Results directory is empty"
+                            }
+                        } else {
+                            echo "   ⚠️  Results directory does not exist: ${RESULTS_DIR}"
+                        }
+                        
+                        // Archive all result files
+                        archiveArtifacts artifacts: "${RESULTS_DIR}/**", allowEmptyArchive: false
+                        
+                        // Publish JUnit test results
+                        def junitFiles = sh(
+                            script: "find ${RESULTS_DIR} -name '*.xml' -type f",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (junitFiles) {
+                            echo "📊 Publishing JUnit test results:"
+                            junitFiles.split('\n').each { file ->
+                                echo "   - ${file}"
+                            }
+                            junit testResults: "${RESULTS_DIR}/**/*.xml", allowEmptyResults: true
+                        } else {
+                            echo "   ⚠️  No JUnit XML files found"
+                        }
+                    }
                 }
             }
         }
