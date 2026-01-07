@@ -620,68 +620,14 @@ pipeline {
                             
                             EXIT_CODE=\$?
                             
-                            # Verify results exist in volume BEFORE copying
-                            echo ""
-                            echo "🔍 Verifying results in Docker volume before copy..."
-                            docker run --rm \\
-                                -v \${WORKSPACE_VOLUME}:/workspace:ro \\
-                                alpine:latest sh -c "
-                                    echo '   Checking volume contents:'
-                                    ls -lah /workspace/ || true
-                                    echo ''
-                                    if [ -d /workspace/${RESULTS_DIR} ]; then
-                                        echo '   ✅ Results directory exists in volume'
-                                        echo '   Results files:'
-                                        ls -lah /workspace/${RESULTS_DIR}/ || true
-                                        echo ''
-                                        FILE_COUNT=\$(find /workspace/${RESULTS_DIR} -type f 2>/dev/null | wc -l)
-                                        echo \"   File count: \${FILE_COUNT}\"
-                                        exit 0
-                                    else
-                                        echo '   ⚠️  Results directory NOT found in volume'
-                                        echo '   Volume root contents:'
-                                        find /workspace -maxdepth 2 -type d 2>/dev/null | head -10 || true
-                                        exit 1
-                                    fi
-                                " || {
-                                echo "⚠️  Results not found in volume - test may have failed or results not written"
-                                echo "   This is not necessarily an error if test failed"
-                            }
-                            
                             # Copy results back from volume to workspace
                             echo ""
                             echo "📦 Copying results back from Docker volume..."
-                            # Get current directory (should be Jenkins workspace)
-                            CURRENT_DIR=\$(pwd)
-                            echo "   Current directory: \${CURRENT_DIR}"
-                            echo "   Target results dir: \${CURRENT_DIR}/${RESULTS_DIR}"
                             
                             # Ensure results directory exists before copying
                             mkdir -p ${RESULTS_DIR}
                             chmod 755 ${RESULTS_DIR} || true
                             rm -f ${RESULTS_DIR}/* 2>/dev/null || true
-                            
-                            # CRITICAL: Use tar pipe to copy files directly from volume to host
-                            # This works even when Jenkins agent is in a container
-                            echo "   Using tar pipe to copy files from volume to host..."
-                            
-                            # First, verify source files exist (simplified to avoid syntax errors)
-                            echo "   Verifying source files in volume..."
-                            docker run --rm \\
-                                -v \${WORKSPACE_VOLUME}:/source:ro \\
-                                alpine:latest sh -c "
-                                    if [ -d /source/${RESULTS_DIR} ]; then
-                                        echo '   Source files in volume:'
-                                        ls -lah /source/${RESULTS_DIR}/ || true
-                                        echo ''
-                                        FILE_COUNT=\$(find /source/${RESULTS_DIR} -type f 2>/dev/null | wc -l)
-                                        echo \"   Found \${FILE_COUNT} files to copy\"
-                                    else
-                                        echo '⚠️  Results directory not found in volume: /source/${RESULTS_DIR}' >&2
-                                        echo '   Volume root contents:' >&2
-                                        ls -la /source/ 2>&1 || true
-                                    fi
-                                " || echo "   ⚠️  Verification had issues, continuing with copy anyway..."
                             
                             # Create tar archive (redirect echo to stderr, only tar to stdout)
                             echo "   Creating tar archive from volume..."
@@ -744,59 +690,10 @@ pipeline {
                                 exit 1
                             fi
                             
-                            # CRITICAL: Fix ownership and permissions AFTER copy
-                            # Files are owned by root in container, need to fix for Jenkins user
-                            echo ""
-                            echo "🔧 Fixing file ownership and permissions..."
+                            # Fix ownership and permissions
                             chown -R \$(id -u):\$(id -g) ${RESULTS_DIR}/ 2>/dev/null || true
-                            # Fix permissions for files (not directory)
                             find ${RESULTS_DIR} -type f -exec chmod 644 {} \\; 2>/dev/null || true
                             find ${RESULTS_DIR} -type d -exec chmod 755 {} \\; 2>/dev/null || true
-                            
-                            # Verify files are in Jenkins workspace IMMEDIATELY after copy
-                            echo ""
-                            echo "🔍 Verifying results in Jenkins workspace:"
-                            echo "   Directory: \$(pwd)/${RESULTS_DIR}"
-                            echo "   Absolute path: \${CURRENT_DIR}/${RESULTS_DIR}"
-                            
-                            # Check if directory exists
-                            if [ ! -d "${RESULTS_DIR}" ]; then
-                                echo "   ❌ Results directory does not exist!"
-                                exit 1
-                            fi
-                            
-                            echo "   ✅ Results directory exists"
-                            
-                            # List directory contents first
-                            echo "   Directory listing:"
-                            ls -lah ${RESULTS_DIR}/ || true
-                            
-                            # Count files
-                            FILE_COUNT=\$(find ${RESULTS_DIR} -type f 2>/dev/null | wc -l)
-                            echo "   File count: \${FILE_COUNT}"
-                            
-                            if [ "\${FILE_COUNT}" -gt 0 ]; then
-                                echo "   ✅ Files found:"
-                                find ${RESULTS_DIR} -type f -exec ls -lh {} \\; || true
-                                
-                                # Verify each expected file exists
-                                echo ""
-                                echo "   📋 Verifying expected files:"
-                                for file in ats-summary.json boot_messages.log junit.xml meta.yaml uart_boot.log; do
-                                    if [ -f "${RESULTS_DIR}/\${file}" ]; then
-                                        FILE_SIZE=\$(stat -c%s "${RESULTS_DIR}/\${file}" 2>/dev/null || echo "0")
-                                        echo "      ✅ \${file}: \${FILE_SIZE} bytes"
-                                    else
-                                        echo "      ❌ \${file} MISSING"
-                                    fi
-                                done
-                            else
-                                echo "   ❌ No files found in results directory!"
-                                echo "   This is a critical error - files were copied but not found"
-                                echo "   Checking if files exist with different permissions:"
-                                sudo ls -lah ${RESULTS_DIR}/ 2>/dev/null || ls -lah ${RESULTS_DIR}/ || true
-                                exit 1
-                            fi
                             
                             # Cleanup volume
                             echo "🧹 Cleaning up Docker volume..."
