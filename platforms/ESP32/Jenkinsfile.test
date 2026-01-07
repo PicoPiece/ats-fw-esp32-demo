@@ -641,21 +641,35 @@ pipeline {
                                         ls -lah /source/${RESULTS_DIR}/ || true
                                         echo ''
                                         mkdir -p /dest/${RESULTS_DIR} || true
-                                        # Copy files with verbose output
+                                        # Copy files with verbose output and preserve attributes
                                         echo '   Copying files...'
-                                        cp -v /source/${RESULTS_DIR}/* /dest/${RESULTS_DIR}/ 2>&1
+                                        cp -av /source/${RESULTS_DIR}/* /dest/${RESULTS_DIR}/ 2>&1
                                         echo ''
+                                        # Sync to ensure files are written to host
+                                        sync
                                         echo '✅ Results copied back'
-                                        echo '   Files in destination:'
+                                        echo '   Files in destination (inside container):'
                                         ls -lah /dest/${RESULTS_DIR}/ || true
-                                        echo '   File count:'
+                                        echo '   File count (inside container):'
                                         find /dest/${RESULTS_DIR} -type f | wc -l || echo '0'
+                                        echo '   Verifying files are accessible:'
+                                        for file in ats-summary.json boot_messages.log junit.xml meta.yaml uart_boot.log; do
+                                            if [ -f \"/dest/${RESULTS_DIR}/\${file}\" ]; then
+                                                SIZE=\$(stat -c%s \"/dest/${RESULTS_DIR}/\${file}\" 2>/dev/null || echo '0')
+                                                echo \"      ✅ \${file} (\${SIZE} bytes)\"
+                                            else
+                                                echo \"      ❌ \${file} MISSING\"
+                                            fi
+                                        done
                                     else
                                         echo '⚠️  Results directory not found in volume: /source/${RESULTS_DIR}'
                                         echo '   Volume contents:'
                                         ls -la /source/ || true
                                     fi
                                 " || echo "⚠️  Failed to copy results back"
+                            
+                            # CRITICAL: Sync again after container exits to ensure files are on host
+                            sync
                             
                             # CRITICAL: Fix ownership and permissions AFTER copy
                             # Files are owned by root in container, need to fix for Jenkins user
