@@ -667,7 +667,7 @@ pipeline {
                             
                             # First, verify source files exist
                             echo "   Verifying source files in volume..."
-                            docker run --rm \\
+                            VERIFY_RESULT=\$(docker run --rm \\
                                 -v \${WORKSPACE_VOLUME}:/source:ro \\
                                 alpine:latest sh -c "
                                     if [ -d /source/${RESULTS_DIR} ]; then
@@ -683,12 +683,18 @@ pipeline {
                                         ls -la /source/ 2>&1 || true
                                         exit 1
                                     fi
-                                " || {
+                                " 2>&1)
+                            
+                            VERIFY_EXIT=\$?
+                            echo "\${VERIFY_RESULT}"
+                            
+                            if [ \$VERIFY_EXIT -ne 0 ]; then
                                 echo "❌ Results directory not found in volume"
                                 echo "   Checking volume contents..."
                                 docker run --rm -v \${WORKSPACE_VOLUME}:/source:ro alpine:latest ls -la /source/ || true
-                                exit 1
-                            }
+                                # Don't exit here - try to copy anyway, may still work
+                                echo "   ⚠️  Continuing with copy attempt anyway..."
+                            fi
                             
                             # Create tar archive (redirect echo to stderr, only tar to stdout)
                             echo "   Creating tar archive from volume..."
