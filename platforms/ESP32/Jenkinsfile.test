@@ -633,8 +633,9 @@ pipeline {
                             chmod 755 ${RESULTS_DIR} || true
                             rm -f ${RESULTS_DIR}/* 2>/dev/null || true
                             
-                            # Use tar pipe to copy files (more reliable than bind mount)
-                            echo "   Using tar pipe to copy files from volume..."
+                            # CRITICAL: Use tar pipe to copy files directly from volume to host
+                            # This works even when Jenkins agent is in a container
+                            echo "   Using tar pipe to copy files from volume to host..."
                             docker run --rm \\
                                 -v \${WORKSPACE_VOLUME}:/source:ro \\
                                 alpine:latest sh -c "
@@ -642,31 +643,30 @@ pipeline {
                                         echo '   Source files in volume:'
                                         ls -lah /source/${RESULTS_DIR}/ || true
                                         echo ''
-                                        echo '   Extracting results files...'
+                                        echo '   Creating tar archive from volume...'
                                         cd /source/${RESULTS_DIR}
-                                        tar -czf - * 2>/dev/null
+                                        tar -czf - . 2>/dev/null || {
+                                            echo '⚠️  Failed to create tar from volume' >&2
+                                            exit 1
+                                        }
                                     else
-                                        echo '⚠️  Results directory not found in volume' >&2
+                                        echo '⚠️  Results directory not found in volume: /source/${RESULTS_DIR}' >&2
+                                        ls -la /source/ || true
                                         exit 1
                                     fi
-                                " | tar -xzf - -C ${RESULTS_DIR}/ 2>&1 || {
-                                echo "⚠️  Tar pipe copy failed, trying bind mount fallback..."
-                                docker run --rm \\
-                                    -v \${WORKSPACE_VOLUME}:/source:ro \\
-                                    -v "\${CURRENT_DIR}:/dest" \\
-                                    alpine:latest sh -c "
-                                        if [ -d /source/${RESULTS_DIR} ]; then
-                                            mkdir -p /dest/${RESULTS_DIR} || true
-                                            cp -av /source/${RESULTS_DIR}/* /dest/${RESULTS_DIR}/ 2>&1
-                                            sync
-                                            echo '✅ Results copied via bind mount'
-                                            ls -lah /dest/${RESULTS_DIR}/ || true
-                                        else
-                                            echo '⚠️  Results directory not found' >&2
-                                            exit 1
-                                        fi
-                                    " || echo "⚠️  Both copy methods failed"
+                                " > ${RESULTS_DIR}/results.tar.gz 2>&1 || {
+                                echo "❌ Failed to create tar from volume"
+                                exit 1
                             }
+                            
+                            # Extract tar archive to results directory
+                            echo "   Extracting tar archive..."
+                            cd ${RESULTS_DIR}
+                            tar -xzf results.tar.gz 2>&1 || {
+                                echo "❌ Failed to extract tar archive"
+                                exit 1
+                            }
+                            rm -f results.tar.gz 2>/dev/null || true
                             
                             # Verify files were copied
                             echo ""
@@ -677,7 +677,8 @@ pipeline {
                                 echo "   Files:"
                                 ls -lah ${RESULTS_DIR}/ || true
                             else
-                                echo "   ⚠️  No files found - copy may have failed"
+                                echo "   ❌ No files found - copy failed"
+                                exit 1
                             fi
                             
                             # CRITICAL: Fix ownership and permissions AFTER copy
