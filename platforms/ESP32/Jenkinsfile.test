@@ -692,39 +692,51 @@ pipeline {
             steps {
                 dir(WORKSPACE_DIR) {
                     script {
-                        // Verify results exist before archiving
-                        def resultsDir = new File("${RESULTS_DIR}")
-                        if (resultsDir.exists()) {
+                        // Verify results exist before archiving using shell commands (sandbox-safe)
+                        def resultsExist = sh(
+                            script: "test -d ${RESULTS_DIR} && echo 'EXISTS' || echo 'NOT_EXISTS'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (resultsExist == 'EXISTS') {
                             echo "📦 Archiving results from ${RESULTS_DIR}"
-                            def files = resultsDir.listFiles()
-                            if (files) {
-                                files.each { file ->
-                                    echo "   - ${file.name} (${file.length()} bytes)"
+                            
+                            // List all files with sizes
+                            def fileList = sh(
+                                script: "find ${RESULTS_DIR} -type f -exec ls -lh {} \\; | awk '{print \$9, \"(\", \$5, \")\"}'",
+                                returnStdout: true
+                            ).trim()
+                            
+                            if (fileList) {
+                                echo "   Files to archive:"
+                                fileList.split('\n').each { line ->
+                                    echo "   - ${line}"
                                 }
                             } else {
                                 echo "   ⚠️  Results directory is empty"
                             }
+                            
+                            // Archive all result files
+                            archiveArtifacts artifacts: "${RESULTS_DIR}/**", allowEmptyArchive: false
+                            
+                            // Publish JUnit test results
+                            def junitFiles = sh(
+                                script: "find ${RESULTS_DIR} -name '*.xml' -type f",
+                                returnStdout: true
+                            ).trim()
+                            
+                            if (junitFiles) {
+                                echo "📊 Publishing JUnit test results:"
+                                junitFiles.split('\n').each { file ->
+                                    echo "   - ${file}"
+                                }
+                                junit testResults: "${RESULTS_DIR}/**/*.xml", allowEmptyResults: true
+                            } else {
+                                echo "   ⚠️  No JUnit XML files found"
+                            }
                         } else {
                             echo "   ⚠️  Results directory does not exist: ${RESULTS_DIR}"
-                        }
-                        
-                        // Archive all result files
-                        archiveArtifacts artifacts: "${RESULTS_DIR}/**", allowEmptyArchive: false
-                        
-                        // Publish JUnit test results
-                        def junitFiles = sh(
-                            script: "find ${RESULTS_DIR} -name '*.xml' -type f",
-                            returnStdout: true
-                        ).trim()
-                        
-                        if (junitFiles) {
-                            echo "📊 Publishing JUnit test results:"
-                            junitFiles.split('\n').each { file ->
-                                echo "   - ${file}"
-                            }
-                            junit testResults: "${RESULTS_DIR}/**/*.xml", allowEmptyResults: true
-                        } else {
-                            echo "   ⚠️  No JUnit XML files found"
+                            error("Results directory not found - cannot archive artifacts")
                         }
                     }
                 }
