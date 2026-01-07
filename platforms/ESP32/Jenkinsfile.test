@@ -669,19 +669,19 @@ pipeline {
                             echo "   Verifying source files in volume..."
                             docker run --rm \\
                                 -v \${WORKSPACE_VOLUME}:/source:ro \\
-                                alpine:latest sh -c "
-                                    if [ -d /source/${RESULTS_DIR} ]; then
-                                        echo '   Source files in volume:'
-                                        ls -lah /source/${RESULTS_DIR}/ || true
-                                        echo ''
-                                        FILE_COUNT=\$(find /source/${RESULTS_DIR} -type f 2>/dev/null | wc -l)
-                                        echo \"   Found \${FILE_COUNT} files to copy\"
+                                alpine:latest sh -c '
+                                    if [ -d /source/'${RESULTS_DIR}' ]; then
+                                        echo "   Source files in volume:"
+                                        ls -lah /source/'${RESULTS_DIR}'/ || true
+                                        echo ""
+                                        FILE_COUNT=$(find /source/'${RESULTS_DIR}' -type f 2>/dev/null | wc -l)
+                                        echo "   Found ${FILE_COUNT} files to copy"
                                     else
-                                        echo '⚠️  Results directory not found in volume: /source/${RESULTS_DIR}' >&2
-                                        echo '   Volume root contents:' >&2
+                                        echo "⚠️  Results directory not found in volume: /source/'${RESULTS_DIR}'" >&2
+                                        echo "   Volume root contents:" >&2
                                         ls -la /source/ 2>&1 || true
                                     fi
-                                " || echo "   ⚠️  Verification had issues, continuing with copy anyway..."
+                                ' || echo "   ⚠️  Verification had issues, continuing with copy anyway..."
                             
                             # Create tar archive (redirect echo to stderr, only tar to stdout)
                             echo "   Creating tar archive from volume..."
@@ -714,25 +714,33 @@ pipeline {
                             
                             # Extract tar archive to results directory
                             echo "   Extracting tar archive..."
-                            cd ${RESULTS_DIR}
-                            tar -xzf results.tar.gz 2>&1 || {
+                            # Extract into results directory (not into results/results/)
+                            tar -xzf ${RESULTS_DIR}/results.tar.gz -C ${RESULTS_DIR}/ 2>&1 || {
                                 echo "❌ Failed to extract tar archive"
                                 echo "   Tar file size: \${TAR_SIZE} bytes"
-                                file results.tar.gz || true
+                                file ${RESULTS_DIR}/results.tar.gz || true
+                                echo "   Trying to list tar contents:"
+                                tar -tzf ${RESULTS_DIR}/results.tar.gz | head -10 || true
                                 exit 1
                             }
-                            rm -f results.tar.gz 2>/dev/null || true
+                            rm -f ${RESULTS_DIR}/results.tar.gz 2>/dev/null || true
                             
                             # Verify files were copied
                             echo ""
                             echo "✅ Results copy completed"
+                            echo "   Checking files in results directory:"
+                            ls -lah ${RESULTS_DIR}/ || true
                             FILE_COUNT=\$(find ${RESULTS_DIR} -type f 2>/dev/null | wc -l)
                             echo "   Files in Jenkins workspace: \${FILE_COUNT}"
                             if [ "\${FILE_COUNT}" -gt 0 ]; then
-                                echo "   Files:"
-                                ls -lah ${RESULTS_DIR}/ || true
+                                echo "   ✅ Files found:"
+                                find ${RESULTS_DIR} -type f -exec ls -lh {} \\; || true
                             else
                                 echo "   ❌ No files found - copy failed"
+                                echo "   Directory contents:"
+                                ls -lah ${RESULTS_DIR}/ || true
+                                echo "   Checking for hidden files:"
+                                find ${RESULTS_DIR} -type f -o -type d | head -20 || true
                                 exit 1
                             fi
                             
