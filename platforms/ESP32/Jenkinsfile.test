@@ -636,6 +636,8 @@ pipeline {
                             # CRITICAL: Use tar pipe to copy files directly from volume to host
                             # This works even when Jenkins agent is in a container
                             echo "   Using tar pipe to copy files from volume to host..."
+                            
+                            # First, verify source files exist
                             docker run --rm \\
                                 -v \${WORKSPACE_VOLUME}:/source:ro \\
                                 alpine:latest sh -c "
@@ -643,27 +645,54 @@ pipeline {
                                         echo '   Source files in volume:'
                                         ls -lah /source/${RESULTS_DIR}/ || true
                                         echo ''
-                                        echo '   Creating tar archive from volume...'
-                                        cd /source/${RESULTS_DIR}
-                                        tar -czf - . 2>/dev/null || {
-                                            echo '⚠️  Failed to create tar from volume' >&2
-                                            exit 1
-                                        }
+                                        FILE_COUNT=\$(find /source/${RESULTS_DIR} -type f | wc -l)
+                                        echo \"   Found \${FILE_COUNT} files to copy\"
                                     else
                                         echo '⚠️  Results directory not found in volume: /source/${RESULTS_DIR}' >&2
                                         ls -la /source/ || true
                                         exit 1
                                     fi
-                                " > ${RESULTS_DIR}/results.tar.gz 2>&1 || {
-                                echo "❌ Failed to create tar from volume"
+                                " || {
+                                echo "❌ Results directory not found in volume"
                                 exit 1
                             }
+                            
+                            # Create tar archive (redirect echo to stderr, only tar to stdout)
+                            echo "   Creating tar archive from volume..."
+                            docker run --rm \\
+                                -v \${WORKSPACE_VOLUME}:/source:ro \\
+                                alpine:latest sh -c "
+                                    if [ -d /source/${RESULTS_DIR} ]; then
+                                        cd /source/${RESULTS_DIR}
+                                        tar -czf - . 2>&1
+                                    else
+                                        echo '⚠️  Results directory not found' >&2
+                                        exit 1
+                                    fi
+                                " > ${RESULTS_DIR}/results.tar.gz 2>${RESULTS_DIR}/tar_errors.log || {
+                                echo "❌ Failed to create tar from volume"
+                                echo "   Error log:"
+                                cat ${RESULTS_DIR}/tar_errors.log 2>/dev/null || true
+                                exit 1
+                            }
+                            
+                            # Verify tar file was created and has content
+                            TAR_SIZE=\$(stat -c%s ${RESULTS_DIR}/results.tar.gz 2>/dev/null || echo "0")
+                            if [ "\${TAR_SIZE}" -eq 0 ]; then
+                                echo "❌ Tar file is empty"
+                                cat ${RESULTS_DIR}/tar_errors.log 2>/dev/null || true
+                                exit 1
+                            fi
+                            echo "   Tar file created: \${TAR_SIZE} bytes"
+                            rm -f ${RESULTS_DIR}/tar_errors.log 2>/dev/null || true
                             
                             # Extract tar archive to results directory
                             echo "   Extracting tar archive..."
                             cd ${RESULTS_DIR}
                             tar -xzf results.tar.gz 2>&1 || {
                                 echo "❌ Failed to extract tar archive"
+                                echo "   Tar file size: \${TAR_SIZE} bytes"
+                                file results.tar.gz || true
                                 exit 1
                             }
                             rm -f results.tar.gz 2>/dev/null || true
