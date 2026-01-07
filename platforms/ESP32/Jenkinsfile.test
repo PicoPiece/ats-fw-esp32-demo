@@ -620,6 +620,34 @@ pipeline {
                             
                             EXIT_CODE=\$?
                             
+                            # Verify results exist in volume BEFORE copying
+                            echo ""
+                            echo "🔍 Verifying results in Docker volume before copy..."
+                            docker run --rm \\
+                                -v \${WORKSPACE_VOLUME}:/workspace:ro \\
+                                alpine:latest sh -c "
+                                    echo '   Checking volume contents:'
+                                    ls -lah /workspace/ || true
+                                    echo ''
+                                    if [ -d /workspace/${RESULTS_DIR} ]; then
+                                        echo '   ✅ Results directory exists in volume'
+                                        echo '   Results files:'
+                                        ls -lah /workspace/${RESULTS_DIR}/ || true
+                                        echo ''
+                                        FILE_COUNT=\$(find /workspace/${RESULTS_DIR} -type f 2>/dev/null | wc -l)
+                                        echo \"   File count: \${FILE_COUNT}\"
+                                        exit 0
+                                    else
+                                        echo '   ⚠️  Results directory NOT found in volume'
+                                        echo '   Volume root contents:'
+                                        find /workspace -maxdepth 2 -type d 2>/dev/null | head -10 || true
+                                        exit 1
+                                    fi
+                                " || {
+                                echo "⚠️  Results not found in volume - test may have failed or results not written"
+                                echo "   This is not necessarily an error if test failed"
+                            }
+                            
                             # Copy results back from volume to workspace
                             echo ""
                             echo "📦 Copying results back from Docker volume..."
